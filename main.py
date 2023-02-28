@@ -41,7 +41,7 @@ def main(args):
         print('Train task:{}'.format(task))
         manager.train_with_eval(train_dataloader, val_dataloader, task)
         for previous in range(task+1):
-            acc, mif1, maf1 = manager.evaluation(test_dataloader)
+            acc, mif1, maf1 = manager.evaluation(test_dataloader, task)
             print('Stage:{} Task:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(task, previous, acc, mif1, maf1))
             # writer.add_scalar(f'{args.method}/{previous}/acc',acc,task)
             # writer.add_scalar(f'{args.method}/{previous}/mif1',mif1,task)

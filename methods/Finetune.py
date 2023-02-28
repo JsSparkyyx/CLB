@@ -70,9 +70,9 @@ class Manager(torch.nn.Module):
             total_loss = total_loss + loss.cpu().item() 
             total_labels = np.concatenate((total_labels, labels.cpu().numpy()), axis=0)
             total_prediction = np.concatenate((total_prediction, prediction.cpu().numpy()), axis=0)
-        acc = accuracy_score(labels, prediction)
-        mif1 = f1_score(labels, prediction, average='micro')
-        maf1 = f1_score(labels, prediction, average='macro')
+        acc = accuracy_score(total_labels, total_prediction)
+        mif1 = f1_score(total_labels, total_prediction, average='micro')
+        maf1 = f1_score(total_labels, total_prediction, average='macro')
         if valid:
             return total_loss, round(acc*100,2), round(mif1*100,2), round(maf1*100,2)
         return round(acc*100,2), round(mif1*100,2), round(maf1*100,2)
