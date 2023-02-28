@@ -29,16 +29,11 @@ def save_results(results,args):
     LA = LA/args.num_tasks
     FM = FM/(args.num_tasks - 1)
     path = os.path.join(args.save_path,args.dataset) + '/' + args.arch+'_'+args.method+'_'+str(args.num_tasks)+'_'+ args.manner +'_overall' + '.csv'
-    if args.dataset == "cfd":
-        index = ""
-        for i in args.indexes:
-            index += i + "->"
-        index = index[:-2]
-        print(index)
-        with open(path, 'a') as f:
-            f.write("{:.2f},{:.2f},{:.2f},{},{},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed,index,args.lamb_distill))
-        
-    else:
-        with open(path, 'a') as f:
-            f.write("{:.2f},{:.2f},{:.2f},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed))
+    index = ""
+    for i in args.indexes:
+        index += i + "->"
+    index = index[:-2]
+    print(index)
+    with open(path, 'a') as f:
+        f.write("{:.2f},{:.2f},{:.2f},{},{},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed,index))
     print("{:.2f},{:.2f},{:.2f},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed))

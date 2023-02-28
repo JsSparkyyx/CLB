@@ -8,13 +8,12 @@ import numpy as np
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
     return int(np.floor((Lin+2*padding-dilation*(kernel_size-1)-1)/float(stride)+1))
 
-class Net(torch.nn.Module):
+class NET(torch.nn.Module):
 
-    def __init__(self,args,taskcla=None):
-        super(Net,self).__init__()
-
-        ncha = args.image_channel
-        size = args.image_size
+    def __init__(self, shape, taskcla, args):
+        super(NET,self).__init__()
+        ncha, size = shape[0], shape[1]
+        self.class_incremental = args.class_incremental
 
         self.taskcla=taskcla
 
@@ -29,7 +28,6 @@ class Net(torch.nn.Module):
         s=s//2
         self.maxpool=torch.nn.MaxPool2d(2)
         self.relu=torch.nn.ReLU()
-        self.args = args
 
 
         self.drop1=torch.nn.Dropout(0.2)
@@ -38,36 +36,27 @@ class Net(torch.nn.Module):
         self.fc2=torch.nn.Linear(2048,2048)
         self.old_weight_norm = []
 
-        if self.taskcla is not None:
-            if 'dil' in args.scenario:
-                self.last=torch.nn.Linear(2048,args.nclasses)
-                self.merge_last=torch.nn.Linear(args.nclasses*2,args.nclasses)
-
-            elif 'til' in args.scenario:
-                self.last=torch.nn.ModuleList()
-                self.merge_last=torch.nn.ModuleList()
-
-                for t,n in self.taskcla:
-                    self.last.append(torch.nn.Linear(2048,n))
-                    self.merge_last.append(torch.nn.Linear(n*2,n))
+        if self.class_incremental:
+            self.predict = torch.nn.ModuleList()
+            for task, n_class in taskcla:
+                self.predict.append(torch.nn.Linear(2048,n_class))
+        else:
+            for task, n_class in taskcla:
+                self.predict = torch.nn.Linear(2048,n_class)
+                break
 
         print('CNN')
 
 
         return
 
-    def forward(self,x):
+    def forward(self, x, task):
         h = self.features(x)
-
-        if self.taskcla is None:
-            if 'dil' in self.args.scenario:
-                y = self.last(h)
-            elif 'til' in self.args.scenario:
-                y=[]
-                for t,i in self.taskcla:
-                    y.append(self.last[t](h))
-            return y
-        return h
+        if self.class_incremental:
+            logits = self.predict[task](h)
+        else:
+            logits = self.predict(h)
+        return logits
 
     def features(self,x):
         h=self.maxpool(self.drop1(self.relu(self.conv1(x))))

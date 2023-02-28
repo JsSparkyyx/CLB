@@ -2,78 +2,77 @@ import torch
 from tqdm import trange
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
+from copy import deepcopy
+
 
 class Manager(torch.nn.Module):
     def __init__(self,
-                 in_feat,
-                 taskcla,
                  arch,
-                 args,
-                 lr = 0.005,
-                 weight_decay = 0.001):
+                 args):
         super(Manager, self).__init__()
         self.arch = arch
         self.current_task = 0
-        self.class_incremental = args.class_incremental
-
-        if self.class_incremental:
-            self.predict = torch.nn.ModuleList()
-            for task, n_class, _ in taskcla:
-                self.predict.append(torch.nn.Linear(in_feat,n_class))
-        else:
-            self.predict = torch.nn.Linear(in_feat,taskcla)
-
+        self.args = args
+        self.class_incremental = self.args.class_incremental
+        self.lr_patience = self.args.lr_patience
+        self.lr_factor = self.args.lr_factor
+        self.lr_min = self.args.lr_min
         self.ce = torch.nn.CrossEntropyLoss()
-        self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
     
-    def forward(self, g, features, task, mini_batch = False):
-        h = self.arch(g, features, mini_batch)
-        if self.class_incremental:
-            logits = self.predict[task](h)
-        else:
-            logits = self.predict(h)
-
+    def forward(self, features, task):
+        logits = self.arch(features, task)
         return logits
 
-    def train_with_eval(self, g, features, task, labels, train_mask, val_mask, args):
+    def train_with_eval(self, train_dataloader, val_dataloader, task):
         self.train()
+        lr = self.args.lr
+        self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        best_loss = np.inf
+        best_model = deepcopy(self.arch.state_dict())
 
-        for epoch in trange(args.epochs, leave=False):
-            self.zero_grad()
-            logits = self.forward(g, features, task)
-            loss = self.ce(logits[train_mask],labels[train_mask])
-            loss.backward()
-            self.opt.step()
-
-            if epoch % 50 == 0:
-                acc, mif1, maf1 = self.evaluation(g, features, task, labels, val_mask)
-                print()
-                print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
-
-    def batch_train_with_eval(self, dataloader, g, features, task, labels, train_mask, val_mask, args):
-        self.train()
-
-        for epoch in trange(args.epochs, leave=False):
-            for seed_nodes, output_nodes, blocks in dataloader:
+        for epoch in trange(self.args.epochs, leave=False):
+            for features, labels in train_dataloader:
+                features, labels = features.to(self.args.device), labels.to(self.args.device)
                 self.zero_grad()
-                logits = self.forward(blocks, features[seed_nodes], task, mini_batch = True)
-                loss = self.ce(logits,labels[output_nodes])
+                logits = self.forward(features, task)
+                loss = self.ce(logits,labels)
                 loss.backward()
                 self.opt.step()
 
-            if epoch % 50 == 0:
-                acc, mif1, maf1 = self.evaluation(g, features, task, labels, val_mask)
-                print()
-                print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
+            val_loss, acc, mif1, maf1 = self.evaluation(val_dataloader, task, valid = True)
+            print()
+            print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, val_loss, acc, mif1, maf1))
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_model = deepcopy(self.arch.state_dict())
+                patience = self.lr_patience
+            else:
+                patience -= 1
+                if patience <= 0:
+                    lr /= self.lr_factor
+                    if lr < self.lr_min:
+                        break
+                    patience = self.lr_patience
+                    self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        self.arch.load_state_dict(deepcopy(best_model))
 
     @torch.no_grad()
-    def evaluation(self, g, features, task, labels, val_mask):
-        self.eval()
-        logits = self.forward(g, features, task)
-        prob, prediction = torch.max(logits, dim=1)
-        prediction = prediction[val_mask].cpu().numpy()
-        labels = labels[val_mask].cpu().numpy()
+    def evaluation(self, test_dataloader, task, valid = False):
+        self.arch.eval()
+        total_prediction = np.array([])
+        total_labels = np.array([])
+        total_loss = 0
+        for features, labels in test_dataloader:
+            features, labels = features.to(self.args.device), labels.to(self.args.device)
+            logits = self.forward(features, task)
+            loss = self.ce(logits,labels)
+            prob, prediction = torch.max(logits, dim=1)
+            total_loss = total_loss + loss.cpu().item() 
+            total_labels = np.concatenate((total_labels, labels.cpu().numpy()), axis=0)
+            total_prediction = np.concatenate((total_prediction, prediction.cpu().numpy()), axis=0)
         acc = accuracy_score(labels, prediction)
         mif1 = f1_score(labels, prediction, average='micro')
         maf1 = f1_score(labels, prediction, average='macro')
+        if valid:
+            return total_loss, round(acc*100,2), round(mif1*100,2), round(maf1*100,2)
         return round(acc*100,2), round(mif1*100,2), round(maf1*100,2)

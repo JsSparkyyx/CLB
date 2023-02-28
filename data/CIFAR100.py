@@ -4,27 +4,26 @@ import torch
 from torchvision import datasets,transforms
 from sklearn.utils import shuffle
 
-cf100_dir = '../datasets/'
-file_dir = '../datasets/binary_cifar100'
+cf100_dir = '../datasets/cf100/'
+file_dir = '../datasets/cf100/binary_cifar100'
 
 def get(args,pc_valid=0.10):
     seed = args.seed
     data={}
     taskcla=[]
-    size=[3,32,32]
 
+    size=[3,32,32]
+    if not os.path.isdir(cf100_dir):
+        os.makedirs(cf100_dir)
     if not os.path.isdir(file_dir):
         os.makedirs(file_dir)
 
         mean=[x/255 for x in [125.3,123.0,113.9]]
         std=[x/255 for x in [63.0,62.1,66.7]]
 
-        # CIFAR100
         dat={}
         dat['train']=datasets.CIFAR100(cf100_dir,train=True,download=True,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
         dat['test']=datasets.CIFAR100(cf100_dir,train=False,download=True,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
-        # dat['train'] = datasets.CIFAR100(cf100_dir,train=True,download=False,transform=transforms.Compose([transforms.ToTensor()]))
-        # dat['test']  = datasets.CIFAR100(cf100_dir,train=False,download=False,transform=transforms.Compose([transforms.ToTensor()]))
         for n in range(10):
             data[n]={}
             data[n]['name']='cifar100'
@@ -62,10 +61,7 @@ def get(args,pc_valid=0.10):
             data[i][s]['x']=torch.load(os.path.join(os.path.expanduser(file_dir),'data'+str(ids[i])+s+'x.bin'))
             data[i][s]['y']=torch.load(os.path.join(os.path.expanduser(file_dir),'data'+str(ids[i])+s+'y.bin'))
         data[i]['ncla']=len(np.unique(data[i]['train']['y'].numpy()))
-        if data[i]['ncla']==2:
-            data[i]['name']='cifar10-'+str(ids[i])
-        else:
-            data[i]['name']='cifar100-'+str(ids[i])
+        data[i]['name']='cifar100-'+str(ids[i])
 
     # Validation
     for t in data.keys():
