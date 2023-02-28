@@ -1,7 +1,6 @@
 from utils import *
 from init_parameters import init_parameters
 # from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from data.load_data import *
 import importlib
 
@@ -22,26 +21,13 @@ def main(args):
     data = {}
     for idx, i in enumerate(args.index):
         data[idx] = unshuffled_data[i]
+    
+    train_dataloaders, test_dataloaders, val_dataloaders = data2dataloaders(data, args)
     for task in range(args.num_tasks):
-        train_samples = TensorDataset(
-                    data[task]['train']['x'],
-                    data[task]['train']['y'],
-                    )
-        test_samples = TensorDataset(
-                    data[task]['test']['x'],
-                    data[task]['test']['y'],
-                    )
-        val_samples = TensorDataset(
-                    data[task]['valid']['x'],
-                    data[task]['valid']['y'],
-                    )
-        train_dataloader = DataLoader(train_samples, sampler=RandomSampler(train_samples), batch_size=args.train_batch_size,pin_memory=True)
-        val_dataloader = DataLoader(val_samples, sampler=SequentialSampler(val_samples), batch_size=args.test_batch_size,pin_memory=True)
-        test_dataloader = DataLoader(test_samples, sampler=SequentialSampler(test_samples), batch_size=args.test_batch_size)
         print('Train task:{}'.format(task))
-        manager.train_with_eval(train_dataloader, val_dataloader, task)
+        manager.train_with_eval(train_dataloaders[task], val_dataloaders[task], task)
         for previous in range(task+1):
-            acc, mif1, maf1 = manager.evaluation(test_dataloader, task)
+            acc, mif1, maf1 = manager.evaluation(test_dataloaders[task], task)
             print('Stage:{} Task:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(task, previous, acc, mif1, maf1))
             # writer.add_scalar(f'{args.method}/{previous}/acc',acc,task)
             # writer.add_scalar(f'{args.method}/{previous}/mif1',mif1,task)

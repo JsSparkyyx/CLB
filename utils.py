@@ -2,6 +2,7 @@ import torch
 import random
 import numpy as np
 import pandas as pd
+from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 import os
 
 def set_seed(seed):
@@ -37,3 +38,28 @@ def save_results(results,args):
     with open(path, 'a') as f:
         f.write("{:.2f},{:.2f},{:.2f},{},{},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed,index))
     print("{:.2f},{:.2f},{:.2f},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed))
+
+def data2dataloaders(data, args):
+    train_dataloaders = []
+    test_dataloaders = []
+    val_dataloaders = []
+    for task in range(args.num_tasks):
+        train_samples = TensorDataset(
+                        data[task]['train']['x'],
+                        data[task]['train']['y'],
+                        )
+        test_samples = TensorDataset(
+                    data[task]['test']['x'],
+                    data[task]['test']['y'],
+                    )
+        val_samples = TensorDataset(
+                    data[task]['valid']['x'],
+                    data[task]['valid']['y'],
+                    )
+        train_dataloader = DataLoader(train_samples, sampler=RandomSampler(train_samples), batch_size=args.train_batch_size,pin_memory=True)
+        val_dataloader = DataLoader(val_samples, sampler=SequentialSampler(val_samples), batch_size=args.test_batch_size,pin_memory=True)
+        test_dataloader = DataLoader(test_samples, sampler=SequentialSampler(test_samples), batch_size=args.test_batch_size)
+        train_dataloaders.append(train_dataloader)
+        test_dataloaders.append(test_dataloader)
+        val_dataloaders.append(val_dataloader)
+    return train_dataloaders, test_dataloaders, val_dataloaders
