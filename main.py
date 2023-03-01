@@ -1,10 +1,9 @@
 from utils import *
 from init_parameters import init_parameters
-# from torch.utils.tensorboard import SummaryWriter
 from data.load_data import *
 import importlib
+# from torch.utils.tensorboard import SummaryWriter
 
-# python main.py --method CR --arch GAT --dataset reddit --manner full_batch --seed 0 --epoch 3000 --lr 0.001 --weight_decay 5e-4
 def main(args):
     # writer = SummaryWriter(f'./results/runs/lamb_distill_{args.lamb_distill}_{args.seed}/metrics')
     unshuffled_data, taskcla, size = load_dataset(args)
