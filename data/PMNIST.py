@@ -6,8 +6,8 @@ from sklearn.utils import shuffle
 
 
 ########################################################################################################################
-mnist_dir = './data/'
-pmnist_dir = './data/binary_pmnist'
+mnist_dir = './datasets/mnist/'
+pmnist_dir = './datasets/pmnist/binary_pmnist'
 def get(seed=0, fixed_order=False, pc_valid=0.1):
     data = {}
     taskcla = []

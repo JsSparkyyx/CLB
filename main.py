@@ -2,6 +2,7 @@ from utils import *
 from init_parameters import init_parameters
 from data.load_data import *
 import importlib
+from time import time
 # from torch.utils.tensorboard import SummaryWriter
 
 def main(args):
@@ -22,6 +23,7 @@ def main(args):
         data[idx] = unshuffled_data[i]
     
     train_dataloaders, test_dataloaders, val_dataloaders = data2dataloaders(data, args)
+    t0 = time()
     for task in range(args.num_tasks):
         print('Train task:{}'.format(task))
         manager.train_with_eval(train_dataloaders[task], val_dataloaders[task], task)
@@ -33,6 +35,8 @@ def main(args):
             # writer.add_scalar(f'{args.method}/{previous}/maf1',maf1,previous)
             results.loc[len(results.index)] = [task,previous,acc,mif1,maf1,args.seed]
         # writer.add_scalar(f'{args.method}/mean_acc',results[results['stage'] == task]['accuracy'].mean(),task)
+    t1 = time()
+    args.time = t1 - t0
     save_results(results,args)
 
 if __name__ == '__main__':

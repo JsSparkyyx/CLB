@@ -36,7 +36,7 @@ def save_results(results,args):
     index = index[:-2]
     print(index)
     with open(path, 'a') as f:
-        f.write("{:.2f},{:.2f},{:.2f},{},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed,index))
+        f.write("{:.2f},{:.2f},{:.2f},{},{},{:.6f}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed,index,args.time))
     print("{:.2f},{:.2f},{:.2f},{}\n".format(round(ACC,2),round(FM,2),round(LA,2),args.seed))
 
 def data2dataloaders(data, args):

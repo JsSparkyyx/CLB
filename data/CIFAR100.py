@@ -4,8 +4,8 @@ import torch
 from torchvision import datasets,transforms
 from sklearn.utils import shuffle
 
-cf100_dir = '../datasets/cf100/'
-file_dir = '../datasets/cf100/binary_cifar100'
+cf100_dir = './datasets/cf100/'
+file_dir = './datasets/cf100/binary_cifar100'
 
 def get(args,pc_valid=0.10):
     seed = args.seed
