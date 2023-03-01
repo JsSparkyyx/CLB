@@ -27,7 +27,7 @@ def main(args):
         print('Train task:{}'.format(task))
         manager.train_with_eval(train_dataloaders[task], val_dataloaders[task], task)
         for previous in range(task+1):
-            acc, mif1, maf1 = manager.evaluation(test_dataloaders[task], task)
+            acc, mif1, maf1 = manager.evaluation(test_dataloaders[previous], previous)
             print('Stage:{} Task:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(task, previous, acc, mif1, maf1))
             # writer.add_scalar(f'{args.method}/{previous}/acc',acc,task)
             # writer.add_scalar(f'{args.method}/{previous}/mif1',mif1,task)
@@ -39,7 +39,6 @@ def main(args):
 if __name__ == '__main__':
     args = init_parameters()
 
-    # torch.cuda.set_device(args.gpu_id)
     args.device = 'cuda:{}'.format(str(args.gpu_id)) if torch.cuda.is_available() else 'cpu'
     args.class_incremental = True
     if args.dataset == 'PMNIST':
