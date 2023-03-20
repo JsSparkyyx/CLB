@@ -8,12 +8,13 @@ from sklearn.utils import shuffle
 ########################################################################################################################
 mnist_dir = './datasets/mnist/'
 pmnist_dir = './datasets/pmnist/binary_pmnist'
-def get(seed=0, fixed_order=False, pc_valid=0.1):
+def get(args, fixed_order=False, pc_valid=0.1):
     data = {}
     taskcla = []
     size = [1, 28, 28]
 
     nperm = 10  # 10 tasks
+    seed = args.seed
     seeds = np.array(list(range(nperm)), dtype=int)
     if not fixed_order:
         seeds = shuffle(seeds, random_state=seed)
@@ -56,7 +57,8 @@ def get(seed=0, fixed_order=False, pc_valid=0.1):
     else:
 
         # Load binary files
-        for i, r in enumerate(seeds):
+        # for i, r in enumerate(seeds):
+        for i, r in enumerate(list(range(nperm))):
             data[i] = dict.fromkeys(['name', 'ncla', 'train', 'test'])
             data[i]['ncla'] = 10
             data[i]['name'] = 'pmnist-{:d}'.format(i)
@@ -70,7 +72,7 @@ def get(seed=0, fixed_order=False, pc_valid=0.1):
     # Validation
     for t in data.keys():
         r=np.arange(data[t]['train']['x'].size(0))
-        r=np.array(shuffle(r,random_state=seed),dtype=int)
+        # r=np.array(shuffle(r,random_state=seed),dtype=int)
         # r=np.array(r,dtype=int)
         nvalid=int(pc_valid*len(r))
         ivalid=torch.LongTensor(r[:nvalid])

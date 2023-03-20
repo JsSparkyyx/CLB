@@ -39,6 +39,29 @@ def main(args):
     args.time = t1 - t0
     save_results(results,args)
 
+def joint_training(args):
+    args.class_incremental = False
+    train_dataloader, test_dataloader, val_dataloader, taskcla, size = load_joint_data(args)
+    arch = importlib.import_module(f'models.{args.arch}')
+    arch = arch.NET(size, taskcla, args)
+    manager = importlib.import_module(f'methods.Finetune')
+    manager = manager.Manager(arch, args).to(args.device)
+
+    results = pd.DataFrame([],columns=['stage','task','accuracy','micro-f1','macro-f1','seed'])
+    index = np.arange(args.num_tasks)
+    np.random.shuffle(index)
+    args.index = index
+    print(args.index)
+
+    t0 = time()
+    manager.train_with_eval(train_dataloader, val_dataloader, 0)
+    acc, mif1, maf1 = manager.evaluation(test_dataloader, 0)
+    print('Stage:{} Task:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(0, 0, acc, mif1, maf1))
+    results.loc[len(results.index)] = [0,0,acc,mif1,maf1,args.seed]
+    t1 = time()
+    args.time = t1 - t0
+    save_results(results,args)
+
 if __name__ == '__main__':
     args = init_parameters()
 
@@ -53,4 +76,7 @@ if __name__ == '__main__':
         args.num_tasks = 5
     set_seed(args.seed)
 
+    if args.methods == 'Joint':
+        joint_training(args)
+        return
     main(args)

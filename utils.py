@@ -63,3 +63,48 @@ def data2dataloaders(data, args):
         test_dataloaders.append(test_dataloader)
         val_dataloaders.append(val_dataloader)
     return train_dataloaders, test_dataloaders, val_dataloaders
+
+def load_joint_data(args):
+    if args.dataset == 'CIFAR100':
+        taskcla = [(0,100)]
+        size=[3,32,32]
+    elif args.dataset == 'PMNIST':
+        taskcla = [(0,10)]
+        size = [1, 28, 28]
+    elif args.dataset == 'SplitMNIST':
+        taskcla = [(0,10)]
+        size = [1, 28, 28]
+    else:
+        raise(args.dataset + ' not supported.')
+    unshuffled_data, taskcla, size = load_dataset(args)
+    data = {}
+    data[0] = unshuffled_data[0]
+    for task in range(1, args.num_tasks):
+        data[0]['train']['x'].append(unshuffled_data[task]['train']['x'])
+        data[0]['train']['y'].append(unshuffled_data[task]['train']['y'])
+        data[0]['test']['x'].append(unshuffled_data[task]['test']['x'])
+        data[0]['test']['y'].append(unshuffled_data[task]['test']['y'])
+        data[0]['valid']['x'].append(unshuffled_data[task]['valid']['x'])
+        data[0]['valid']['y'].append(unshuffled_data[task]['valid']['y'])
+    train_dataloaders = []
+    test_dataloaders = []
+    val_dataloaders = []
+    train_samples = TensorDataset(
+                        data[0]['train']['x'],
+                        data[0]['train']['y'],
+                        )
+    test_samples = TensorDataset(
+                data[0]['test']['x'],
+                data[0]['test']['y'],
+                )
+    val_samples = TensorDataset(
+                data[0]['valid']['x'],
+                data[0]['valid']['y'],
+                )
+    train_dataloader = DataLoader(train_samples, sampler=RandomSampler(train_samples), batch_size=args.train_batch_size,pin_memory=True)
+    val_dataloader = DataLoader(val_samples, sampler=SequentialSampler(val_samples), batch_size=args.test_batch_size,pin_memory=True)
+    test_dataloader = DataLoader(test_samples, sampler=SequentialSampler(test_samples), batch_size=args.test_batch_size)
+    train_dataloaders.append(train_dataloader)
+    test_dataloaders.append(test_dataloader)
+    val_dataloaders.append(val_dataloader)
+    return train_dataloaders, test_dataloaders, val_dataloaders, taskcla, size
