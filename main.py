@@ -41,7 +41,7 @@ def main(args):
 
 def joint_training(args):
     args.class_incremental = False
-    train_dataloader, test_dataloader, val_dataloader, taskcla, size = load_joint_data(args)
+    train_dataloaders, test_dataloaders, val_dataloaders, taskcla, size = load_joint_data(args)
     arch = importlib.import_module(f'models.{args.arch}')
     arch = arch.NET(size, taskcla, args)
     manager = importlib.import_module(f'methods.Finetune')
@@ -51,11 +51,10 @@ def joint_training(args):
     index = np.arange(args.num_tasks)
     np.random.shuffle(index)
     args.index = index
-    print(args.index)
 
     t0 = time()
-    manager.train_with_eval(train_dataloader, val_dataloader, 0)
-    acc, mif1, maf1 = manager.evaluation(test_dataloader, 0)
+    manager.train_with_eval(train_dataloaders[0], val_dataloaders[0], 0)
+    acc, mif1, maf1 = manager.evaluation(test_dataloaders[0], 0)
     print('Stage:{} Task:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(0, 0, acc, mif1, maf1))
     results.loc[len(results.index)] = [0,0,acc,mif1,maf1,args.seed]
     t1 = time()
@@ -76,7 +75,7 @@ if __name__ == '__main__':
         args.num_tasks = 5
     set_seed(args.seed)
 
-    if args.methods == 'Joint':
+    if args.method == 'Joint':
         joint_training(args)
-        return
-    main(args)
+    else:
+        main(args)
