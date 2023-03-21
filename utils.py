@@ -20,7 +20,7 @@ def save_results(results,args):
         os.makedirs(os.path.join(args.save_path,args.dataset,'detail'))
     path = os.path.join(args.save_path,args.dataset,'detail') + '/' + args.arch+'_'+args.method+'_'+str(args.num_tasks)+'_'+str(args.seed) + '.csv'
     results.to_csv(path,index=False)
-    if args.method is not 'Joint':
+    if args.method != 'Joint':
         LA = 0
         FM = 0
         for task in range(args.num_tasks):
