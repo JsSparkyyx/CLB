@@ -10,12 +10,9 @@ def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
 
 class NET(torch.nn.Module):
 
-    def __init__(self, shape, taskcla, args):
+    def __init__(self, shape, args):
         super(NET,self).__init__()
         ncha, size = shape[0], shape[1]
-        self.class_incremental = args.class_incremental
-
-        self.taskcla=taskcla
 
         self.conv1=torch.nn.Conv2d(ncha,64,kernel_size=size//8)
         s=compute_conv_output_size(size,size//8)
@@ -33,30 +30,14 @@ class NET(torch.nn.Module):
         self.drop1=torch.nn.Dropout(0.2)
         self.drop2=torch.nn.Dropout(0.5)
         self.fc1=torch.nn.Linear(256*s*s,2048)
-        self.fc2=torch.nn.Linear(2048,2048)
-        self.old_weight_norm = []
-
-        if self.class_incremental:
-            self.predict = torch.nn.ModuleList()
-            for task, n_class in taskcla:
-                self.predict.append(torch.nn.Linear(2048,n_class))
-        else:
-            for task, n_class in taskcla:
-                self.predict = torch.nn.Linear(2048,n_class)
-                break
+        self.fc2=torch.nn.Linear(2048,1000)
 
         print('CNN')
-
-
         return
 
-    def forward(self, x, task):
+    def forward(self, x):
         h = self.features(x)
-        if self.class_incremental:
-            logits = self.predict[task](h)
-        else:
-            logits = self.predict(h)
-        return logits
+        return h
 
     def features(self,x):
         h=self.maxpool(self.drop1(self.relu(self.conv1(x))))

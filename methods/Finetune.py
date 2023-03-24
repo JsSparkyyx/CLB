@@ -8,6 +8,7 @@ from copy import deepcopy
 class Manager(torch.nn.Module):
     def __init__(self,
                  arch,
+                 taskcla,
                  args):
         super(Manager, self).__init__()
         self.arch = arch
@@ -18,15 +19,29 @@ class Manager(torch.nn.Module):
         self.lr_factor = self.args.lr_factor
         self.lr_min = self.args.lr_min
         self.ce = torch.nn.CrossEntropyLoss()
+
+        if self.class_incremental:
+            self.predict = torch.nn.ModuleList()
+            for task, n_class in taskcla:
+                self.predict.append(torch.nn.Linear(1000,n_class))
+        else:
+            for task, n_class in taskcla:
+                self.predict = torch.nn.Linear(1000,n_class)
+                break
     
     def forward(self, features, task):
-        logits = self.arch(features, task)
+        h = self.arch(features)
+        if self.class_incremental:
+            logits = self.predict[task](h)
+        else:
+            logits = self.predict(h)
         return logits
 
     def train_with_eval(self, train_dataloader, val_dataloader, task):
         self.train()
         lr = self.args.lr
-        self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
+        # self.opt = torch.optim.Adam(self.arch.parameters(),lr=1e-4)
         best_loss = np.inf
         best_model = deepcopy(self.arch.state_dict())
 
@@ -49,7 +64,7 @@ class Manager(torch.nn.Module):
             else:
                 patience -= 1
                 if patience <= 0:
-                    lr /= self.lr_factor
+                    lr /= self.lr_factor   
                     if lr < self.lr_min:
                         break
                     patience = self.lr_patience

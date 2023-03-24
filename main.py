@@ -9,9 +9,9 @@ def main(args):
     # writer = SummaryWriter(f'./results/runs/lamb_distill_{args.lamb_distill}_{args.seed}/metrics')
     unshuffled_data, taskcla, size = load_dataset(args)
     arch = importlib.import_module(f'models.{args.arch}')
-    arch = arch.NET(size, taskcla, args)
+    arch = arch.NET(size, args)
     manager = importlib.import_module(f'methods.{args.method}')
-    manager = manager.Manager(arch, args).to(args.device)
+    manager = manager.Manager(arch, taskcla, args).to(args.device)
 
     results = pd.DataFrame([],columns=['stage','task','accuracy','micro-f1','macro-f1','seed'])
     index = np.arange(args.num_tasks)
@@ -43,9 +43,9 @@ def joint_training(args):
     args.class_incremental = False
     train_dataloaders, test_dataloaders, val_dataloaders, taskcla, size = load_joint_data(args)
     arch = importlib.import_module(f'models.{args.arch}')
-    arch = arch.NET(size, taskcla, args)
+    arch = arch.NET(size, args)
     manager = importlib.import_module(f'methods.Finetune')
-    manager = manager.Manager(arch, args).to(args.device)
+    manager = manager.Manager(arch, taskcla, args).to(args.device)
 
     results = pd.DataFrame([],columns=['stage','task','accuracy','micro-f1','macro-f1','seed'])
     index = np.arange(args.num_tasks)

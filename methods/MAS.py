@@ -6,6 +6,7 @@ from copy import deepcopy
 class Manager(torch.nn.Module):
     def __init__(self,
                  arch,
+                 taskcla,
                  args):
         super(Manager, self).__init__()
         self.arch = arch
@@ -20,8 +21,21 @@ class Manager(torch.nn.Module):
         self.lamb = 0.75
         self.ce = torch.nn.CrossEntropyLoss()
 
+        if self.class_incremental:
+            self.predict = torch.nn.ModuleList()
+            for task, n_class in taskcla:
+                self.predict.append(torch.nn.Linear(1000,n_class))
+        else:
+            for task, n_class in taskcla:
+                self.predict = torch.nn.Linear(1000,n_class)
+                break
+
     def forward(self, features, task):
-        logits = self.arch(features, task)
+        h = self.arch(features)
+        if self.class_incremental:
+            logits = self.predict[task](h)
+        else:
+            logits = self.predict(h)
         return logits
 
     def calculate_fisher(self, train_dataloader, task):
