@@ -70,9 +70,9 @@ class Manager(torch.nn.Module):
     def train_with_eval(self, train_dataloader, val_dataloader, task):
         self.train()
         lr = self.args.lr
-        self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
         best_loss = np.inf
-        best_model = deepcopy(self.arch.state_dict())
+        best_model = deepcopy(self.state_dict())
 
         for epoch in trange(self.args.epochs, leave=False):
             for features, labels in train_dataloader:
@@ -96,7 +96,7 @@ class Manager(torch.nn.Module):
             print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, val_loss, acc, mif1, maf1))
             if val_loss < best_loss:
                 best_loss = val_loss
-                best_model = deepcopy(self.arch.state_dict())
+                best_model = deepcopy(self.state_dict())
                 patience = self.lr_patience
             else:
                 patience -= 1
@@ -105,8 +105,8 @@ class Manager(torch.nn.Module):
                     if lr < self.lr_min:
                         break
                     patience = self.lr_patience
-                    self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
-        self.arch.load_state_dict(deepcopy(best_model))
+                    self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
+        self.load_state_dict(deepcopy(best_model))
         fisher, params = self.calculate_fisher(train_dataloader, task)
         self.current_task = task
         self.fisher[self.current_task] = fisher
@@ -114,7 +114,7 @@ class Manager(torch.nn.Module):
 
     @torch.no_grad()
     def evaluation(self, test_dataloader, task, valid = False):
-        self.arch.eval()
+        self.eval()
         total_prediction = np.array([])
         total_labels = np.array([])
         total_loss = 0

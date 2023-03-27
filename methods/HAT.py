@@ -2,12 +2,12 @@ import torch
 from tqdm import trange
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
+from copy import deepcopy
 
 class Manager(torch.nn.Module):
     def __init__(self,
-                 in_feat,
-                 taskcla,
                  arch,
+                 taskcla,
                  args):
         super(Manager,self).__init__()
         self.arch = arch
@@ -28,22 +28,31 @@ class Manager(torch.nn.Module):
         self.relu=torch.nn.ReLU()
         self.drop1=torch.nn.Dropout(0.2)
         self.drop2=torch.nn.Dropout(0.5)
-        self.fc1=torch.nn.Linear(in_feat,n_hidden)
+        self.fc1=torch.nn.Linear(1000,n_hidden)
         self.fc2=torch.nn.Linear(n_hidden,n_hidden)
         self.efc1=torch.nn.Embedding(len(taskcla),n_hidden)
         self.efc2=torch.nn.Embedding(len(taskcla),n_hidden)
         self.gate=torch.nn.Sigmoid()
         self.predict = torch.nn.ModuleList()
-        for task, n_class, _ in taskcla:
-            self.predict.append(torch.nn.Linear(n_hidden,n_class))
+        if self.class_incremental:
+            self.predict = torch.nn.ModuleList()
+            for task, n_class in taskcla:
+                self.predict.append(torch.nn.Linear(n_hidden,n_class))
+        else:
+            for task, n_class in taskcla:
+                self.predict = torch.nn.Linear(n_hidden,n_class)
+                break
         self.ce=torch.nn.CrossEntropyLoss()
     
-    def forward(self, g, features, task, s, mini_batch = False):
-        h = self.arch(g, features, mini_batch)
+    def forward(self, features, task, s):
+        h = self.arch(features)
         masks = self.mask(task,s=s)
         gfc1, gfc2 = masks
         h = self.get_feature(h,gfc1,gfc2)
-        logits = self.predict[task](h)
+        if self.class_incremental:
+            logits = self.predict[task](h)
+        else:
+            logits = self.predict(h)
 
         return logits, masks
     
@@ -77,18 +86,19 @@ class Manager(torch.nn.Module):
 
         return None
     
-    def train_with_eval(self, dataloader, val_dataloader,g, features, task, labels, train_mask, val_mask, args):
+    def train_with_eval(self, train_dataloader, val_dataloader, task):
         self.train()
         lr = self.args.lr
         self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
         best_loss = np.inf
         best_model = deepcopy(self.arch.state_dict())
-        for epoch in trange(args.epochs, leave=False):
-            for step, (seed_nodes, output_nodes, blocks) in enumerate(dataloader):
-                s=(self.smax-1/self.smax)*step/(g.num_nodes()//args.batch_size)+1/self.smax
+        for epoch in trange(self.args.epochs, leave=False):
+            for step, (features, labels) in enumerate(train_dataloader):
+                s=(self.smax-1/self.smax)*step/self.args.num_batches[task]+1/self.smax
+                features, labels = features.to(self.args.device), labels.to(self.args.device)
                 self.zero_grad()
-                logits, masks = self.forward(blocks, features[seed_nodes], task, s, mini_batch = True)
-                loss = self.ce(logits,labels[output_nodes])
+                logits, masks = self.forward(features, task, s)
+                loss = self.ce(logits,labels)
                 reg=0
                 count=0
                 if self.mask_pre is not None:
@@ -126,7 +136,7 @@ class Manager(torch.nn.Module):
                     if n.startswith('e'):
                         p.data=torch.clamp(p.data,-self.thres_emb,self.thres_emb)
 
-            val_loss, acc, mif1, maf1 = self.evaluation(g,val_dataloader, task, valid = True)
+            val_loss, acc, mif1, maf1 = self.evaluation(val_dataloader, task, valid = True)
             print()
             print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
             if val_loss < best_loss:
@@ -160,16 +170,14 @@ class Manager(torch.nn.Module):
                 self.mask_back[n]=1-vals
 
     @torch.no_grad()
-    def evaluation(self, g, test_dataloader, task, valid = False):
+    def evaluation(self, test_dataloader, task, valid = False):
         self.arch.eval()
         total_prediction = np.array([])
         total_labels = np.array([])
         total_loss = 0
         for features, labels in test_dataloader:
-            logits, masks = self.forward(g, features, task, self.smax)
-            prob, prediction = torch.max(logits, dim=1)
-            prediction = prediction[val_mask].cpu().numpy()
-            labels = labels[val_mask].cpu().numpy()
+            features, labels = features.to(self.args.device), labels.to(self.args.device)
+            logits, masks = self.forward(features, task, self.smax)
             loss = self.ce(logits,labels)
             prob, prediction = torch.max(logits, dim=1)
             total_loss = total_loss + loss.cpu().item() 
