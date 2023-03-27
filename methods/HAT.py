@@ -8,38 +8,35 @@ class Manager(torch.nn.Module):
                  in_feat,
                  taskcla,
                  arch,
-                 args,
-                 pdrop1 = 0.2,
-                 pdrop2 = 0.5,
-                 n_hidden = 2000,
-                 lr = 0.005,
-                 weight_decay = 0.001):
-        super(Manager, self).__init__()
+                 args):
+        super(Manager,self).__init__()
         self.arch = arch
         self.current_task = 0
-        self.thres_cosh = 50
-        self.thres_emb = 6
+        self.args = args
+        self.class_incremental = self.args.class_incremental
+        self.lr_patience = self.args.lr_patience
+        self.lr_factor = self.args.lr_factor
+        self.lr_min = self.args.lr_min
         self.lamb = 0.75
         self.smax = 400
         self.clipgrad = 10000
         self.mask_pre = None
         self.mask_back = None
-
+        self.thres_cosh = 50
+        self.thres_emb = 6
+        n_hidden = 1000
         self.relu=torch.nn.ReLU()
-        self.drop1=torch.nn.Dropout(pdrop1)
-        self.drop2=torch.nn.Dropout(pdrop2)
+        self.drop1=torch.nn.Dropout(0.2)
+        self.drop2=torch.nn.Dropout(0.5)
         self.fc1=torch.nn.Linear(in_feat,n_hidden)
         self.fc2=torch.nn.Linear(n_hidden,n_hidden)
-
         self.efc1=torch.nn.Embedding(len(taskcla),n_hidden)
         self.efc2=torch.nn.Embedding(len(taskcla),n_hidden)
         self.gate=torch.nn.Sigmoid()
         self.predict = torch.nn.ModuleList()
         for task, n_class, _ in taskcla:
             self.predict.append(torch.nn.Linear(n_hidden,n_class))
-
-        self.ce = torch.nn.CrossEntropyLoss()
-        self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
+        self.ce=torch.nn.CrossEntropyLoss()
     
     def forward(self, g, features, task, s, mini_batch = False):
         h = self.arch(g, features, mini_batch)
@@ -79,78 +76,13 @@ class Manager(torch.nn.Module):
             return gfc2.data.view(-1)
 
         return None
-
-    def train_with_eval(self, g, features, task, labels, train_mask, val_mask, args):
+    
+    def train_with_eval(self, dataloader, val_dataloader,g, features, task, labels, train_mask, val_mask, args):
         self.train()
-        s = self.smax
-        for epoch in trange(args.epochs, leave=False):
-            self.zero_grad()
-            logits, masks = self.forward(g, features, task, s)
-            loss = self.ce(logits[train_mask],labels[train_mask])
-            reg=0
-            count=0
-            if self.mask_pre is not None:
-                for m,mp in zip(masks,self.mask_pre):
-                    aux=1-mp
-                    reg+=(m*aux).sum()
-                    count+=aux.sum()
-            else:
-                for m in masks:
-                    reg+=m.sum()
-                    count+=np.prod(m.size()).item()
-            reg/=count
-            loss = loss + self.lamb*reg
-            loss.backward()
-
-            # Restrict layer gradients in backprop
-            if task>0:
-                for n,p in self.named_parameters():
-                    if n in self.mask_back:
-                        p.grad.data*=self.mask_back[n]
-
-            # Compensate embedding gradients
-            for n,p in self.named_parameters():
-                if n.startswith('e'):
-                    num=torch.cosh(torch.clamp(s*p.data,-self.thres_cosh,self.thres_cosh))+1
-                    den=torch.cosh(p.data)+1
-                    p.grad.data*=self.smax/s*num/den
-
-            # Apply step
-            torch.nn.utils.clip_grad_norm_(self.parameters(),self.clipgrad)
-            self.opt.step()
-
-            # Constrain embeddings
-            for n,p in self.named_parameters():
-                if n.startswith('e'):
-                    p.data=torch.clamp(p.data,-self.thres_emb,self.thres_emb)
-
-            if epoch % 50 == 0:
-                acc, mif1, maf1 = self.evaluation(g, features, task, labels, val_mask)
-                print()
-                print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
-                # Activations mask
-                
-        mask=self.mask(task,s=self.smax)
-        for i in range(len(mask)):
-            mask[i]=torch.autograd.Variable(mask[i].data.clone(),requires_grad=False)
-        if task==0:
-            self.mask_pre=mask
-        else:
-            for i in range(len(self.mask_pre)):
-                self.mask_pre[i]=torch.max(self.mask_pre[i],mask[i])
-
-        # Weights mask
-        self.mask_back={}
-        for n,_ in self.named_parameters():
-            vals=self.get_view_for(n,self.mask_pre)
-            if vals is not None:
-                print(vals)
-                self.mask_back[n]=1-vals
-        print(self.mask_back)
-
-    def batch_train_with_eval(self, dataloader, g, features, task, labels, train_mask, val_mask, args):
-        self.train()
-
+        lr = self.args.lr
+        self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        best_loss = np.inf
+        best_model = deepcopy(self.arch.state_dict())
         for epoch in trange(args.epochs, leave=False):
             for step, (seed_nodes, output_nodes, blocks) in enumerate(dataloader):
                 s=(self.smax-1/self.smax)*step/(g.num_nodes()//args.batch_size)+1/self.smax
@@ -194,11 +126,22 @@ class Manager(torch.nn.Module):
                     if n.startswith('e'):
                         p.data=torch.clamp(p.data,-self.thres_emb,self.thres_emb)
 
-            if epoch % 50 == 0:
-                acc, mif1, maf1 = self.evaluation(g, features, task, labels, val_mask)
-                print()
-                print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
-
+            val_loss, acc, mif1, maf1 = self.evaluation(g,val_dataloader, task, valid = True)
+            print()
+            print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_model = deepcopy(self.arch.state_dict())
+                patience = self.lr_patience
+            else:
+                patience -= 1
+                if patience <= 0:
+                    lr /= self.lr_factor
+                    if lr < self.lr_min:
+                        break
+                    patience = self.lr_patience
+                    self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        self.arch.load_state_dict(deepcopy(best_model))
         # Activations mask
         mask=self.mask(task,s=self.smax)
         for i in range(len(mask)):
@@ -217,13 +160,24 @@ class Manager(torch.nn.Module):
                 self.mask_back[n]=1-vals
 
     @torch.no_grad()
-    def evaluation(self, g, features, task, labels, val_mask):
-        self.eval()
-        logits, masks = self.forward(g, features, task, self.smax)
-        prob, prediction = torch.max(logits, dim=1)
-        prediction = prediction[val_mask].cpu().numpy()
-        labels = labels[val_mask].cpu().numpy()
-        acc = accuracy_score(labels, prediction)
-        mif1 = f1_score(labels, prediction, average='micro')
-        maf1 = f1_score(labels, prediction, average='macro')
+    def evaluation(self, g, test_dataloader, task, valid = False):
+        self.arch.eval()
+        total_prediction = np.array([])
+        total_labels = np.array([])
+        total_loss = 0
+        for features, labels in test_dataloader:
+            logits, masks = self.forward(g, features, task, self.smax)
+            prob, prediction = torch.max(logits, dim=1)
+            prediction = prediction[val_mask].cpu().numpy()
+            labels = labels[val_mask].cpu().numpy()
+            loss = self.ce(logits,labels)
+            prob, prediction = torch.max(logits, dim=1)
+            total_loss = total_loss + loss.cpu().item() 
+            total_labels = np.concatenate((total_labels, labels.cpu().numpy()), axis=0)
+            total_prediction = np.concatenate((total_prediction, prediction.cpu().numpy()), axis=0)
+        acc = accuracy_score(total_labels, total_prediction)
+        mif1 = f1_score(total_labels, total_prediction, average='micro')
+        maf1 = f1_score(total_labels, total_prediction, average='macro')
+        if valid:
+            return total_loss, round(acc*100,2), round(mif1*100,2), round(maf1*100,2)
         return round(acc*100,2), round(mif1*100,2), round(maf1*100,2)
