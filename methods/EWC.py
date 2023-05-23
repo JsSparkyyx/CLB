@@ -19,7 +19,8 @@ class Manager(torch.nn.Module):
         self.lr_min = self.args.lr_min
         self.fisher = {}
         self.params = {}
-        self.lamb = 0.75
+        # self.lamb = 0.75
+        self.lamb = 500
         self.ce = torch.nn.CrossEntropyLoss()
 
         if self.class_incremental:
@@ -69,13 +70,15 @@ class Manager(torch.nn.Module):
         return fisher, params
 
     def train_with_eval(self, train_dataloader, val_dataloader, task):
-        self.train()
         lr = self.args.lr
+        patience = self.lr_patience
         self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
+        # self.opt = torch.optim.SGD(self.parameters(),lr=lr)
         best_loss = np.inf
         best_model = deepcopy(self.state_dict())
 
         for epoch in trange(self.args.epochs, leave=False):
+            self.train()
             for features, labels in train_dataloader:
                 features, labels = features.to(self.args.device), labels.to(self.args.device)
                 self.zero_grad()
@@ -87,7 +90,7 @@ class Manager(torch.nn.Module):
                         for n, p in self.named_parameters():
                             l = self.fisher[t][n]
                             l = l * (p - self.params[t][n]).pow(2)
-                            loss_ewc += l.sum()
+                            loss_ewc += l.sum() 
                     loss = loss + self.lamb*loss_ewc
                 loss.backward()
                 self.opt.step()
@@ -107,6 +110,7 @@ class Manager(torch.nn.Module):
                         break
                     patience = self.lr_patience
                     self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
+                    # self.opt = torch.optim.SGD(self.parameters(),lr=lr)
         self.load_state_dict(deepcopy(best_model))
         fisher, params = self.calculate_fisher(train_dataloader, task)
         self.current_task = task

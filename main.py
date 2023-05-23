@@ -71,6 +71,8 @@ if __name__ == '__main__':
         args.num_tasks = 10
     elif args.dataset == 'CIFAR100':
         args.num_tasks = 10
+    elif args.dataset == 'CIFAR10':
+        args.num_tasks = 5
     elif args.dataset == 'SplitMNIST':
         args.num_tasks = 5
     set_seed(args.seed)

@@ -2,6 +2,7 @@ import torch
 from tqdm import trange
 from sklearn.metrics import accuracy_score, f1_score
 from copy import deepcopy
+import numpy as np
 
 class Manager(torch.nn.Module):
     def __init__(self,
@@ -70,6 +71,7 @@ class Manager(torch.nn.Module):
     def train_with_eval(self, train_dataloader, val_dataloader, task):
         self.train()
         lr = self.args.lr
+        patience = self.lr_patience
         self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
         best_loss = np.inf
         best_model = deepcopy(self.state_dict())

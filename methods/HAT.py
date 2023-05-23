@@ -87,14 +87,14 @@ class Manager(torch.nn.Module):
         return None
     
     def train_with_eval(self, train_dataloader, val_dataloader, task):
-        self.train()
         lr = self.args.lr
-        self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+        self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
         best_loss = np.inf
         best_model = deepcopy(self.arch.state_dict())
         for epoch in trange(self.args.epochs, leave=False):
+            self.train()
             for step, (features, labels) in enumerate(train_dataloader):
-                s=(self.smax-1/self.smax)*step/self.args.num_batches[task]+1/self.smax
+                s=(self.smax-1/self.smax)*step/len(train_dataloader)+1/self.smax
                 features, labels = features.to(self.args.device), labels.to(self.args.device)
                 self.zero_grad()
                 logits, masks = self.forward(features, task, s)
@@ -150,7 +150,7 @@ class Manager(torch.nn.Module):
                     if lr < self.lr_min:
                         break
                     patience = self.lr_patience
-                    self.opt = torch.optim.SGD(self.arch.parameters(),lr=lr)
+                    self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
         self.arch.load_state_dict(deepcopy(best_model))
         # Activations mask
         mask=self.mask(task,s=self.smax)
@@ -171,7 +171,7 @@ class Manager(torch.nn.Module):
 
     @torch.no_grad()
     def evaluation(self, test_dataloader, task, valid = False):
-        self.arch.eval()
+        self.eval()
         total_prediction = np.array([])
         total_labels = np.array([])
         total_loss = 0

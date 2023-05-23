@@ -1,16 +1,11 @@
 import torch
-import torch.nn.functional as F
 from tqdm import trange
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
+from copy import deepcopy
+import torch.nn.functional as F
 
-def reservoir(num_seen_examples: int, buffer_size: int) -> int:
-    """
-    Reservoir sampling algorithm.
-    :param num_seen_examples: the number of seen examples
-    :param buffer_size: the maximum buffer size
-    :return: the target index if the current image is sampled, else -1
-    """
+def reservoir(num_seen_examples, buffer_size):
     if num_seen_examples < buffer_size:
         return num_seen_examples
 
@@ -19,30 +14,31 @@ def reservoir(num_seen_examples: int, buffer_size: int) -> int:
         return rand
     else:
         return -1
-
+    
 class buffer:
     def __init__(self, buffer_size, device):
         self.buffer_size = buffer_size
         self.device = device
-        self.num_seen_samples = 0
-        self.attributes = ['graph','features','labels','logits','masks']
+        self.num_seen_examples = 0
+        self.attributes = ['features','labels','logits']
 
-    def init_tensors(self,
-                        graph: torch.Tensor,
-                        features: torch.Tensor,
-                        labels: torch.Tensor,
-                        logits: torch.Tensor,
-                        masks: torch.Tensor):
+    def init_tensors(self,features,labels,logits):
         for attr_str in self.attributes:
             attr = eval(attr_str)
             if attr is not None and not hasattr(self, attr_str):
                 typ = torch.int64 if attr_str == 'labels' else torch.float32
                 setattr(self, attr_str, torch.zeros((self.buffer_size,
                         *attr.shape[1:]), dtype=typ, device=self.device))
+    
+    def is_empty(self):
+        if self.num_seen_examples == 0:
+            return True
+        else:
+            return False
 
-    def store_data(self, g, features, labels, logits, masks):
-        if not hasattr(self, 'examples'):
-            self.init_tensors(g, features, labels, logits, masks)
+    def store_data(self,features, labels, logits):
+        if not hasattr(self, 'features'):
+            self.init_tensors(features, labels, logits)
         
         for i in range(features.shape[0]):
             index = reservoir(self.num_seen_examples, self.buffer_size)
@@ -51,10 +47,6 @@ class buffer:
                 self.features[index] = features[i].to(self.device)
                 if labels is not None:
                     self.labels[index] = labels[i].to(self.device)
-                if g is not None:
-                    self.g[index] = g[i].to(self.device)
-                if logits is not None:
-                    self.masks[index] = masks[i].to(self.device)
                 if logits is not None:
                     self.logits[index] = logits[i].to(self.device)
 
@@ -62,124 +54,116 @@ class buffer:
         if size > min(self.num_seen_examples, self.features.shape[0]):
             size = min(self.num_seen_examples, self.features.shape[0])
 
-        choice = np.random.choice(min(self.num_seen_examples, self.examples.shape[0]),
+        choice = np.random.choice(min(self.num_seen_examples, self.features.shape[0]),
                                   size=size, replace=False)
-        for attr_str in self.attributes:
+        ret_tuple = (torch.stack([ee.cpu() for ee in self.features[choice]]).to(self.device),)
+        for attr_str in self.attributes[1:]:
             if hasattr(self, attr_str):
                 attr = getattr(self, attr_str)
                 ret_tuple += (attr[choice],)
 
         return ret_tuple
-
+    
 class Manager(torch.nn.Module):
     def __init__(self,
-                 in_feat,
-                 taskcla,
                  arch,
-                 args,
-                 lr = 0.005,
-                 weight_decay = 0.001):
+                 taskcla,
+                 args):
         super(Manager, self).__init__()
         self.arch = arch
         self.current_task = 0
-        self.alpha = args.derpp_alpha
-        self.beta = args.derpp_beta
-        self.buffer_size = args.derpp_buffer_size
+        self.args = args
+        self.class_incremental = self.args.class_incremental
+        self.lr_patience = self.args.lr_patience
+        self.lr_factor = self.args.lr_factor
+        self.lr_min = self.args.lr_min
+        self.alpha = 0.2
+        self.beta = 0.5
+        self.ce = torch.nn.CrossEntropyLoss()
+        self.buffer_size = 5120
         self.buffer = buffer(self.buffer_size, args.device)
-        self.class_incremental = args.class_incremental
-
         if self.class_incremental:
             self.predict = torch.nn.ModuleList()
-            for task, n_class, _ in taskcla:
-                self.predict.append(torch.nn.Linear(in_feat,n_class))
+            for task, n_class in taskcla:
+                self.predict.append(torch.nn.Linear(1000,n_class))
         else:
-            self.predict = torch.nn.Linear(in_feat,taskcla)
-
-        self.ce = torch.nn.CrossEntropyLoss()
-        self.opt = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=weight_decay)
+            for task, n_class in taskcla:
+                self.predict = torch.nn.Linear(1000,n_class)
+                break
     
-    def forward(self, g, features, task, mini_batch = False):
-        h = self.arch(g, features, mini_batch)
+    def forward(self, features, task):
+        h = self.arch(features)
         if self.class_incremental:
             logits = self.predict[task](h)
         else:
             logits = self.predict(h)
-
         return logits
 
-    def train_with_eval(self, g, features, task, labels, train_mask, val_mask, args):
+
+
+    def train_with_eval(self, train_dataloader, val_dataloader, task):
         self.train()
-
-        for epoch in trange(args.epochs, leave=False):
-            self.zero_grad()
-            logits = self.forward(g, features, task)
-            loss = self.ce(logits[train_mask],labels[train_mask])
-            loss_reg = 0
-            if task != 0:
-                buf_g, buf_features, buf_labels, buf_logits, buf_masks = self.buffer.get_data(self.buffer_size)
-                buf_output = self.forward(buf_g, buf_features, task)
-
-                loss_reg += self.alpha * F.mse_loss(buf_output, buf_logits)
-                loss_reg += self.beta * F.cross_entropy(buf_output, buf_labels[buf_masks])
-
-            loss = loss + loss_reg
-            loss.backward()
-            self.opt.step()
-
-            if epoch % 50 == 0:
-                acc, mif1, maf1 = self.evaluation(g, features, task, labels, val_mask)
-                print()
-                print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
-
-        self.current_task = task
-        self.buffer.store_data(
-            graph=g,
-            labels=labels,
-            logits = logits.data ,
-            masks=train_mask,
-        )
-
-    def batch_train_with_eval(self, dataloader, g, features, task, labels, train_mask, val_mask, args):
-        self.train()
-
-        for epoch in trange(args.epochs, leave=False):
-            for seed_nodes, output_nodes, blocks in dataloader:
+        lr = self.args.lr
+        self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
+        # self.opt = torch.optim.Adam(self.parameters(),lr=0.001, weight_decay=5e-4)
+        best_loss = np.inf
+        best_model = deepcopy(self.state_dict())
+        for epoch in trange(self.args.epochs, leave=False):
+            for features, labels in train_dataloader:
+                features, labels = features.to(self.args.device), labels.to(self.args.device)
                 self.zero_grad()
-                logits = self.forward(blocks, features[seed_nodes], task, mini_batch = True)
-                loss = self.ce(logits,labels[output_nodes])
+                logits = self.forward(features, task)
+                loss = self.ce(logits,labels)
                 loss_reg = 0
-                if task != 0:
-                    buf_g, buf_features, buf_labels, buf_logits, buf_masks = self.buffer.get_data(self.buffer_size)
-                    buf_output = self.forward(buf_g, buf_features, task)
-
-                    loss_reg += self.alpha * F.mse_loss(buf_output, buf_logits)
-                    loss_reg += self.beta * F.cross_entropy(buf_output, buf_labels[buf_masks])
-
+                if not self.buffer.is_empty():
+                    buf_features, buf_labels, buf_logits= self.buffer.get_data(self.buffer_size)
+                    buf_output = self.forward(buf_features, task)
+                    loss_reg = loss + self.alpha * F.mse_loss(buf_output, buf_logits)
+                    loss_reg = loss + self.beta * F.cross_entropy(buf_output, buf_labels)
                 loss = loss + loss_reg
-                loss.backward()
+                loss.backward(retain_graph=True)
                 self.opt.step()
-
-            if epoch % 50 == 0:
-                acc, mif1, maf1 = self.evaluation(g, features, task, labels, val_mask)
-                print()
-                print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, loss.item(), acc, mif1, maf1))
-
-        self.current_task = task
+            
+            val_loss, acc, mif1, maf1 = self.evaluation(val_dataloader, task, valid = True)
+            print()
+            print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, val_loss, acc, mif1, maf1))
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_model = deepcopy(self.state_dict())
+                patience = self.lr_patience
+            else:
+                patience -= 1
+                if patience <= 0:
+                    lr /= self.lr_factor   
+                    if lr < self.lr_min:
+                        break
+                    patience = self.lr_patience
+                    self.opt = torch.optim.SGD(self.parameters(),lr=lr)
+        self.load_state_dict(deepcopy(best_model))
         self.buffer.store_data(
-            graph=g,
-            labels=labels,
-            logits = logits.data ,
-            masks=train_mask,
+            features=features,
+            labels = labels,
+            logits = logits,
         )
+
 
     @torch.no_grad()
-    def evaluation(self, g, features, task, labels, val_mask):
+    def evaluation(self, test_dataloader, task, valid = False):
         self.eval()
-        logits = self.forward(g, features, task)
-        prob, prediction = torch.max(logits, dim=1)
-        prediction = prediction[val_mask].cpu().numpy()
-        labels = labels[val_mask].cpu().numpy()
-        acc = accuracy_score(labels, prediction)
-        mif1 = f1_score(labels, prediction, average='micro')
-        maf1 = f1_score(labels, prediction, average='macro')
+        total_prediction = np.array([])
+        total_labels = np.array([])
+        total_loss = 0
+        for features, labels in test_dataloader:
+            features, labels = features.to(self.args.device), labels.to(self.args.device)
+            logits = self.forward(features, task)
+            loss = self.ce(logits,labels)
+            prob, prediction = torch.max(logits, dim=1)
+            total_loss = total_loss + loss.cpu().item() 
+            total_labels = np.concatenate((total_labels, labels.cpu().numpy()), axis=0)
+            total_prediction = np.concatenate((total_prediction, prediction.cpu().numpy()), axis=0)
+        acc = accuracy_score(total_labels, total_prediction)
+        mif1 = f1_score(total_labels, total_prediction, average='micro')
+        maf1 = f1_score(total_labels, total_prediction, average='macro')
+        if valid:
+            return total_loss, round(acc*100,2), round(mif1*100,2), round(maf1*100,2)
         return round(acc*100,2), round(mif1*100,2), round(maf1*100,2)

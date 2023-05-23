@@ -61,7 +61,7 @@ def get(args,pc_valid=0.10):
             data[i][s]['x']=torch.load(os.path.join(os.path.expanduser(file_dir),'data'+str(ids[i])+s+'x.bin'))
             data[i][s]['y']=torch.load(os.path.join(os.path.expanduser(file_dir),'data'+str(ids[i])+s+'y.bin'))
         data[i]['ncla']=len(np.unique(data[i]['train']['y'].numpy()))
-        data[i]['name']='cifar100-'+str(ids[i])
+        data[i]['name']='SMNIST-'+str(ids[i])
 
     # Validation
     for t in data.keys():

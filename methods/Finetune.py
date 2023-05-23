@@ -3,6 +3,7 @@ from tqdm import trange
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 from copy import deepcopy
+from utils import WarmUpLR
 
 
 class Manager(torch.nn.Module):
@@ -38,14 +39,18 @@ class Manager(torch.nn.Module):
         return logits
 
     def train_with_eval(self, train_dataloader, val_dataloader, task):
-        self.train()
         lr = self.args.lr
+        # self.opt = torch.optim.SGD(self.parameters(),lr=lr)
         self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
-        # self.opt = torch.optim.Adam(self.parameters(),lr=0.001, weight_decay=5e-4)
+        # self.train_scheduler = torch.optim.lr_scheduler.MultiStepLR(self.opt, milestones=[60,120,160], gamma=0.2)
+        # self.warmup_scheduler = WarmUpLR(self.opt, len(train_dataloader) * self.args.warm)
         best_loss = np.inf
         best_model = deepcopy(self.state_dict())
 
         for epoch in trange(self.args.epochs, leave=False):
+            self.train()
+            # if epoch >= self.args.warm:
+                # self.train_scheduler.step()
             for features, labels in train_dataloader:
                 features, labels = features.to(self.args.device), labels.to(self.args.device)
                 self.zero_grad()
@@ -54,21 +59,23 @@ class Manager(torch.nn.Module):
                 loss.backward()
                 self.opt.step()
 
+                # if epoch < self.args.warm:
+                    # self.warmup_scheduler.step()
             val_loss, acc, mif1, maf1 = self.evaluation(val_dataloader, task, valid = True)
             print()
             print('Val, Epoch:{}, Loss:{}, ACC:{}, Micro-F1:{}, Macro-F1:{}'.format(epoch, val_loss, acc, mif1, maf1))
-            if val_loss < best_loss:
+            if val_loss < best_loss:    
                 best_loss = val_loss
-                best_model = deepcopy(self.state_dict())
+                best_model = deepcopy(self.arch.state_dict())
                 patience = self.lr_patience
             else:
                 patience -= 1
                 if patience <= 0:
-                    lr /= self.lr_factor   
+                    lr /= self.lr_factor
                     if lr < self.lr_min:
                         break
                     patience = self.lr_patience
-                    self.opt = torch.optim.SGD(self.parameters(),lr=lr)
+                    self.opt = torch.optim.SGD(self.parameters(),lr=lr, momentum=0.9, weight_decay=5e-4)
         self.load_state_dict(deepcopy(best_model))
 
     @torch.no_grad()
